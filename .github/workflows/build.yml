@@ -1,70 +1,55 @@
 name: build
+
 on:
+  push:
+  pull_request:
   workflow_dispatch:
+
 jobs:
   build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest]
-        build_type: [Release]
-        enable_ui: [on]
-        include:
-          - os: windows-latest
-            build_type: Release
-            enable_ui: on
+    runs-on: windows-latest
+    timeout-minutes: 40
+
     steps:
-      # 检出代码仓库，包含子模块
       - uses: actions/checkout@v4
         with:
-          submodules: 'recursive'
+          submodules: recursive
 
-      # 仅在 Linux 系统上使用 ccache 进行编译缓存
-      - name: ccache
-        uses: hendrikmuhs/ccache-action@v1
-        if: runner.os == 'Linux'
-        with:
-          key: ${{ matrix.os }}-${{ matrix.enable_ui }}
-
-      # 设置 Ninja 构建工具
-      - uses: seanmiddleditch/gha-setup-ninja@master
-
-      # 仅在 Windows 系统上设置 MSVC 开发环境
+      # Ninja + MSVC
+      - uses: aseprite/get-ninja@main
       - uses: ilammy/msvc-dev-cmd@v1
-        if: runner.os == 'Windows'
 
-      # 生成 CMake 构建文件
-      - name: Generating Makefiles
+      # Install dependencies (Skia from official script like new build)
+      - name: Install Skia
         shell: bash
         run: |
-          export enable_ccache=off
-          # 下载 Skia 库和依赖 DLL 文件
-          curl -L https://github.com/blueloveTH/aseprite/releases/download/v0.01/skia.zip --output skia.zip
-          curl -L https://github.com/blueloveTH/aseprite/releases/download/v0.01/libcrypto-1_1-x64.dll --output libcrypto-1_1-x64.dll
-          # 解压 Skia 库
-          7z x skia.zip
-          # 配置 CMake 项目
-          cmake -S . -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-            -DENABLE_UI=${{ matrix.enable_ui }} \
-            -DENABLE_CCACHE=$enable_ccache \
-            -DLAF_BACKEND=skia \
-            -DSKIA_DIR=./skia \
-            -DSKIA_LIBRARY_DIR=./skia/out/Release-x64 \
-            -DSKIA_LIBRARY=./skia/out/Release-x64/skia.lib
+          skia_url=$(bash laf/misc/skia-url.sh)
+          curl -L -o skia.zip "$skia_url"
+          unzip skia.zip -d skia
 
-      # 编译项目
-      - name: Compiling
+      # Configure
+      - name: Configure
         shell: bash
         run: |
-          cd build && ninja
+          cmake -S . -B build -G Ninja ^
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo ^
+            -DLAF_BACKEND=skia ^
+            -DSKIA_DIR=$(realpath skia) ^
+            -DSKIA_LIBRARY_DIR=$(realpath skia/out/Release-x64) ^
+            -DENABLE_TESTS=OFF ^
+            -DENABLE_CCACHE=OFF
 
-      # 上传构建产物
-      - uses: actions/upload-artifact@v4
+      # Build
+      - name: Build
+        shell: bash
+        run: |
+          cd build && ninja aseprite
+
+      # Upload artifact (THIS is what your old fork lacked properly)
+      - name: Upload build
+        uses: actions/upload-artifact@v4
         with:
-          name: aseprite
+          name: aseprite-windows
           path: |
-            libcrypto-1_1-x64.dll
-            build/bin/data
             build/bin/aseprite.exe
+            build/bin/data
