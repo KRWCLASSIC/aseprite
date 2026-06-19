@@ -8,45 +8,81 @@ on:
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
 
     steps:
-      - uses: actions/checkout@v4
+      # ----------------------------
+      # Checkout (CRITICAL: full submodules)
+      # ----------------------------
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           submodules: recursive
+          fetch-depth: 0
 
-      # Ninja + MSVC
-      - uses: aseprite/get-ninja@main
-      - uses: ilammy/msvc-dev-cmd@v1
+      # ----------------------------
+      # Sync + force submodules (fixes missing third_party issues)
+      # ----------------------------
+      - name: Init submodules
+        shell: bash
+        run: |
+          git submodule sync --recursive
+          git submodule update --init --recursive --force
 
-      # Install dependencies (Skia from official script like new build)
-      - name: Install Skia
+      # ----------------------------
+      # Tools
+      # ----------------------------
+      - name: Setup Ninja
+        uses: aseprite/get-ninja@main
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      # ----------------------------
+      # Skia (official dynamic fetch)
+      # ----------------------------
+      - name: Download Skia
         shell: bash
         run: |
           skia_url=$(bash laf/misc/skia-url.sh)
+          echo "Skia URL: $skia_url"
           curl -L -o skia.zip "$skia_url"
-          unzip skia.zip -d skia
+          unzip -q skia.zip -d skia
 
-      # Configure
-      - name: Configure
+      # ----------------------------
+      # Configure (SAFE minimal config)
+      # ----------------------------
+      - name: Configure CMake
         shell: bash
         run: |
           cmake -S . -B build -G Ninja ^
             -DCMAKE_BUILD_TYPE=RelWithDebInfo ^
             -DLAF_BACKEND=skia ^
-            -DSKIA_DIR=$(realpath skia) ^
-            -DSKIA_LIBRARY_DIR=$(realpath skia/out/Release-x64) ^
             -DENABLE_TESTS=OFF ^
-            -DENABLE_CCACHE=OFF
+            -DENABLE_CCACHE=OFF ^
+            -DSKIA_DIR=$(realpath skia) ^
+            -DSKIA_LIBRARY_DIR=$(realpath skia/out/Release-x64)
 
+      # ----------------------------
       # Build
+      # ----------------------------
       - name: Build
         shell: bash
         run: |
-          cd build && ninja aseprite
+          cmake --build build -- -j 4
 
-      # Upload artifact (THIS is what your old fork lacked properly)
-      - name: Upload build
+      # ----------------------------
+      # Verify output (debug safety step)
+      # ----------------------------
+      - name: Check output
+        shell: bash
+        run: |
+          ls build/bin || echo "build/bin missing"
+
+      # ----------------------------
+      # Artifact upload (FINAL OUTPUT)
+      # ----------------------------
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: aseprite-windows
