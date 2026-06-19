@@ -11,48 +11,39 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      # ----------------------------
-      # Checkout (CRITICAL: full submodules)
-      # ----------------------------
+      # ---------------- checkout ----------------
       - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: recursive
           fetch-depth: 0
 
-      # ----------------------------
-      # Sync + force submodules (fixes missing third_party issues)
-      # ----------------------------
-      - name: Init submodules
+      # ---------------- hard reset repo state (IMPORTANT FIX) ----------------
+      - name: Fix submodules (critical for third_party errors)
         shell: bash
         run: |
           git submodule sync --recursive
           git submodule update --init --recursive --force
+          git clean -xfd
 
-      # ----------------------------
-      # Tools
-      # ----------------------------
+      # ---------------- tools ----------------
       - name: Setup Ninja
         uses: aseprite/get-ninja@main
 
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
 
-      # ----------------------------
-      # Skia (official dynamic fetch)
-      # ----------------------------
+      # ---------------- Skia (official script) ----------------
       - name: Download Skia
         shell: bash
         run: |
           skia_url=$(bash laf/misc/skia-url.sh)
-          echo "Skia URL: $skia_url"
+          echo "Skia: $skia_url"
           curl -L -o skia.zip "$skia_url"
           unzip -q skia.zip -d skia
 
-      # ----------------------------
-      # Configure (SAFE minimal config)
-      # ----------------------------
-      - name: Configure CMake
+      # ---------------- configure ----------------
+      - name: Configure
         shell: bash
         run: |
           cmake -S . -B build -G Ninja ^
@@ -63,25 +54,20 @@ jobs:
             -DSKIA_DIR=$(realpath skia) ^
             -DSKIA_LIBRARY_DIR=$(realpath skia/out/Release-x64)
 
-      # ----------------------------
-      # Build
-      # ----------------------------
+      # ---------------- build ----------------
       - name: Build
         shell: bash
         run: |
           cmake --build build -- -j 4
 
-      # ----------------------------
-      # Verify output (debug safety step)
-      # ----------------------------
+      # ---------------- debug safety ----------------
       - name: Check output
         shell: bash
         run: |
-          ls build/bin || echo "build/bin missing"
+          echo "=== build/bin ==="
+          ls build/bin || echo "missing build/bin"
 
-      # ----------------------------
-      # Artifact upload (FINAL OUTPUT)
-      # ----------------------------
+      # ---------------- artifact ----------------
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
